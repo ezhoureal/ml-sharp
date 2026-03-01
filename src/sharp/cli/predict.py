@@ -119,7 +119,16 @@ def predict_cli(
         state_dict = torch.hub.load_state_dict_from_url(DEFAULT_MODEL_URL, progress=True)
     else:
         LOGGER.info("Loading checkpoint from %s", checkpoint_path)
-        state_dict = torch.load(checkpoint_path, weights_only=True)
+        loaded = torch.load(checkpoint_path, weights_only=False)
+
+        # Handle both regular state_dict and palettized model format
+        if isinstance(loaded, dict) and "model_state_dict" in loaded:
+            LOGGER.info("Detected palettized model format.")
+            state_dict = loaded["model_state_dict"]
+            if "config" in loaded:
+                LOGGER.info("Model palettization config: %s", loaded["config"])
+        else:
+            state_dict = loaded
 
     gaussian_predictor = create_predictor(PredictorParams())
     gaussian_predictor.load_state_dict(state_dict)

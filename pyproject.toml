@@ -5,6 +5,7 @@ description = "Inference/Network/Model code for SHARP view synthesis model."
 readme = "README.md"
 dependencies = [
   "click",
+  "coremltools>=9.0",
   "gsplat",
   "imageio[ffmpeg]",
   "matplotlib",
