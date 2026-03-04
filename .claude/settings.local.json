@@ -4,7 +4,8 @@
       "Bash(uv run palettize_model.py)",
       "mcp__ide__getDiagnostics",
       "Bash(python:*)",
-      "Bash(uv run python:*)"
+      "Bash(uv run python:*)",
+      "Bash(ls -la:*)"
     ]
   }
 }
