@@ -150,6 +150,16 @@ def decompose_covariance_matrices(
 
     # We convert to fp64 to avoid numerical errors.
     covariance_matrices = covariance_matrices.detach().cpu().to(torch.float64)
+
+    # Handle both 3D (N, 3, 3) and 4D (B, N, 3, 3) inputs
+    original_shape = covariance_matrices.shape
+    if len(original_shape) == 3:
+        # Add batch dimension: (N, 3, 3) -> (1, N, 3, 3)
+        covariance_matrices = covariance_matrices.unsqueeze(0)
+        squeeze_output = True
+    else:
+        squeeze_output = False
+
     rotations, singular_values_2, _ = torch.linalg.svd(covariance_matrices)
 
     # NOTE: in SVD, it is possible that U and VT are both reflections.
@@ -163,7 +173,14 @@ def decompose_covariance_matrices(
         )
         # Flip the last column of reflection and make it a rotation.
         rotations[batch_idx, gaussian_idx, :, -1] *= -1
+
     quaternions = linalg.quaternions_from_rotation_matrices(rotations)
+
+    # Remove batch dimension if we added it
+    if squeeze_output:
+        quaternions = quaternions.squeeze(0)
+        singular_values_2 = singular_values_2.squeeze(0)
+
     quaternions = quaternions.to(dtype=dtype, device=device)
     singular_values = singular_values_2.sqrt().to(dtype=dtype, device=device)
     return quaternions, singular_values

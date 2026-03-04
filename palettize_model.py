@@ -1,8 +1,10 @@
-"""Palettize the SHARP model to 4-bit using coremltools.
+"""Palettize the SHARP model to 4-bit and convert to Core ML format.
 
 This script applies post-training palettization to the SHARP model,
 quantizing weights to 4 bits (16 palette levels) for efficient
 deployment on Apple devices.
+
+The palettized model is converted directly to Core ML format (.mlpackage).
 
 For licensing see accompanying LICENSE file.
 Copyright (C) 2025 Apple Inc. All Rights Reserved.
@@ -12,9 +14,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
+import coremltools as ct
 import torch
-import torch.nn.functional as F
 from coremltools.optimize.torch.palettization import (
     PostTrainingPalettizer,
     PostTrainingPalettizerConfig,
@@ -29,7 +32,6 @@ DEFAULT_RESOLUTION = (1536, 1536)
 
 
 def create_calibration_data(
-    model: torch.nn.Module,
     device: torch.device,
     num_samples: int = 8,
     resolution: tuple[int, int] = DEFAULT_RESOLUTION,
@@ -37,7 +39,6 @@ def create_calibration_data(
     """Create calibration data for palettization.
 
     Args:
-        model: The model to generate calibration data for.
         device: The device to run on.
         num_samples: Number of random calibration samples.
         resolution: Image resolution for calibration.
@@ -49,7 +50,7 @@ def create_calibration_data(
     calibration_data = []
 
     LOGGER.info(f"Creating {num_samples} calibration samples...")
-    for i in range(num_samples):
+    for _ in range(num_samples):
         # Create random RGB image
         image = torch.rand(1, 3, height, width, device=device)
 
@@ -62,32 +63,27 @@ def create_calibration_data(
     return calibration_data
 
 
-def palettize_model(
+def palettize_and_convert(
     model_path: Path | None = None,
     output_path: Path | None = None,
+    device: str = "default",
     n_bits: int = 4,
-    granularity: str = "per_grouped_channel",
-    group_size: int = 4,
-    calibration_nsamples: int = 8,
-    device: str = "cpu",
-) -> torch.nn.Module:
-    """Palettize the SHARP model to n-bits.
+) -> Path:
+    """Palettize the SHARP model and convert to Core ML format.
 
     Args:
         model_path: Path to the model checkpoint. If None, downloads default model.
-        output_path: Path to save the palettized model.
-        n_bits: Number of bits for palettization (default 4 = 16 levels).
-        granularity: Granularity for palettization ('per_tensor' or 'per_grouped_channel').
-        group_size: Number of channels in a group for per_grouped_channel.
-        calibration_nsamples: Number of calibration samples.
+        output_path: Path to save the Core ML model.
         device: Device to run on ('cpu', 'cuda', or 'mps').
+        n_bits: Number of bits for palettization (default 4 = 16 levels).
+        minimum_deployment_target: Minimum deployment target for Core ML conversion.
 
     Returns:
-        The palettized model.
+        Path to the saved Core ML model.
     """
     # Set up logging
     logging.basicConfig(level=logging.INFO)
-    LOGGER.info("Starting SHARP model palettization")
+    LOGGER.info("Starting SHARP model palettization and Core ML conversion")
 
     # Determine device
     if device == "default":
@@ -97,6 +93,11 @@ def palettize_model(
             device = "mps"
         else:
             device = "cpu"
+
+    # Force CPU for MPS since coremltools K-means doesn't support it
+    if device == "mps":
+        device = "cpu"
+        LOGGER.info("MPS detected but using CPU (coremltools K-means requires CPU)")
 
     device_obj = torch.device(device)
     LOGGER.info(f"Using device: {device}")
@@ -115,13 +116,12 @@ def palettize_model(
     model.eval()
     model.to(device_obj)
 
-    # Configure palettization
+    # Configure palettization with per_tensor granularity for better compression
     palettization_config_dict = {
         "global_config": {
             "n_bits": n_bits,
-            "granularity": granularity,
-            "group_size": group_size,
-            "lut_dtype": "int8",
+            "granularity": "per_tensor",
+            "lut_dtype": torch.int8,  # Use int8 for LUT indices to save memory
         },
     }
 
@@ -132,33 +132,29 @@ def palettize_model(
     palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
     palettizer = PostTrainingPalettizer(model, palettization_config)
 
-    # Prepare calibration data
-    calibration_data = create_calibration_data(model, device_obj, calibration_nsamples)
-
     # Apply palettization
     LOGGER.info("Applying post-training palettization...")
+
+    # Log skipped layers before compression
+    skipped_layers = []
+    for name, module in model.named_modules():
+        if hasattr(module, 'weight') and module.weight is not None:
+            weight_shape = cast(torch.Size, module.weight.shape)
+            # Check if shape would cause issues with palettization
+            if len(weight_shape) < 2:
+                skipped_layers.append((name, weight_shape, "insufficient dimensions"))
+            elif weight_shape[0] == 1 or weight_shape[1] == 1:
+                skipped_layers.append((name, weight_shape, "dimension size of 1"))
+
+    if skipped_layers:
+        LOGGER.info(f"Layers that may be skipped during palettization:")
+        for name, shape, reason in skipped_layers:
+            LOGGER.info(f"  - {name}: shape {shape}, reason: {reason}")
+
+    # Compress the model using K-means clustering on weights
     palettized_model = palettizer.compress()
 
     LOGGER.info("Palettization complete!")
-
-    # Save palettized model
-    if output_path is None:
-        output_path = Path("sharp_palettized_4bit.pt")
-
-    LOGGER.info(f"Saving palettized model to {output_path}")
-    torch.save(
-        {"model_state_dict": palettized_model.state_dict(), "config": palettization_config_dict},
-        output_path,
-    )
-
-    LOGGER.info(f"Palettized model saved to {output_path}")
-
-    # Print model statistics
-    total_params = sum(p.numel() for p in model.parameters())
-    palettized_params = sum(p.numel() for p in palettized_model.parameters())
-
-    LOGGER.info(f"Original parameters: {total_params:,}")
-    LOGGER.info(f"Palettized parameters: {palettized_params:,}")
 
     # Count palettized modules
     palettized_modules = 0
@@ -168,8 +164,50 @@ def palettize_model(
 
     LOGGER.info(f"Number of palettized modules: {palettized_modules}")
 
-    return palettized_model
+    # Determine output path
+    if output_path is None:
+        output_path = Path(f"sharp_palettized_{n_bits}bit.mlpackage")
 
+    # Ensure we're saving as .mlpackage
+    if output_path.suffix != ".mlpackage":
+        output_path = output_path.with_suffix(".mlpackage")
+
+    LOGGER.info(f"Exporting to Core ML format ({output_path})...")
+
+    # Trace the model to TorchScript
+    LOGGER.info("Tracing model to TorchScript...")
+    example_image = torch.rand(
+        1, 3, DEFAULT_RESOLUTION[0], DEFAULT_RESOLUTION[1], device=device_obj
+    )
+    example_disparity = torch.tensor([0.5], device=device_obj)
+
+    with torch.no_grad():
+        traced_model = torch.jit.trace(palettized_model, (example_image, example_disparity))
+
+    # Export to Core ML format
+    LOGGER.info("Converting to Core ML...")
+    mlmodel = ct.convert(
+        traced_model,
+        source="pytorch",
+        inputs=[
+            ct.TensorType(
+                name="image",
+                shape=(1, 3, DEFAULT_RESOLUTION[0], DEFAULT_RESOLUTION[1]),
+            ),
+            ct.TensorType(name="disparity_factor", shape=(1,)),
+        ],
+        minimum_deployment_target=ct.target.macOS26,
+    )
+
+    if not isinstance(mlmodel, ct.models.MLModel):
+        LOGGER.error("Failed to convert model to Core ML format.")
+        raise RuntimeError("Core ML conversion failed.")
+
+    # Save the model
+    mlmodel.save(str(output_path))
+    LOGGER.info(f"Core ML model saved to {output_path}")
+
+    return output_path
 
 def compare_outputs(
     original_model: torch.nn.Module,
@@ -193,7 +231,7 @@ def compare_outputs(
     max_diff = 0.0
     total_diff = 0.0
 
-    for i in range(num_samples):
+    for _ in range(num_samples):
         with torch.no_grad():
             # Create random test input
             image = torch.rand(1, 3, height, width, device=device)
@@ -204,11 +242,21 @@ def compare_outputs(
             original_output = original_model(image, disparity_factor)
             palettized_output = palettized_model(image, disparity_factor)
 
-            # Compare gaussians output
-            for key in original_output:
-                orig_tensor = getattr(original_output, key)
-                palett_tensor = getattr(palettized_output, key)
+            # Compare outputs - handle both dataclass and dict outputs
+            def get_tensors(output):
+                if isinstance(output, dict):
+                    return output.values()
+                elif hasattr(output, "__dataclass_fields__"):
+                    return [getattr(output, k) for k in output.__dataclass_fields__]
+                elif isinstance(output, (list, tuple)):
+                    return output
+                else:
+                    return [output]
 
+            orig_tensors = get_tensors(original_output)
+            palett_tensors = get_tensors(palettized_output)
+
+            for orig_tensor, palett_tensor in zip(orig_tensors, palett_tensors):
                 if torch.is_tensor(orig_tensor) and torch.is_tensor(palett_tensor):
                     diff = (orig_tensor - palett_tensor).abs().max().item()
                     max_diff = max(max_diff, diff)
@@ -222,7 +270,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Palettize SHARP model to 4-bit using coremltools"
+        description="Palettize SHARP model to 4-bit and convert to Core ML format"
     )
     parser.add_argument(
         "-c",
@@ -236,39 +284,13 @@ if __name__ == "__main__":
         "--output-path",
         type=Path,
         default=None,
-        help="Path to save the palettized model.",
+        help="Path to save the Core ML model (default: sharp_palettized_4bit.mlpackage).",
     )
     parser.add_argument(
         "--n-bits",
         type=int,
         default=4,
         help="Number of bits for palettization (default: 4 = 16 levels).",
-    )
-    parser.add_argument(
-        "--granularity",
-        type=str,
-        default="per_grouped_channel",
-        choices=["per_tensor", "per_grouped_channel"],
-        help="Granularity for palettization.",
-    )
-    parser.add_argument(
-        "--group-size",
-        type=int,
-        default=4,
-        help="Group size for per_grouped_channel granularity.",
-    )
-    parser.add_argument(
-        "--calibration-nsamples",
-        type=int,
-        default=8,
-        help="Number of calibration samples.",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda", "mps", "default"],
-        help="Device to run on.",
     )
     parser.add_argument(
         "--compare",
@@ -278,34 +300,40 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Set default output path
-    if args.output_path is None:
-        args.output_path = Path(f"sharp_palettized_{args.n_bits}bit.pt")
+    # Palettize and convert
+    output_path = palettize_and_convert(
+        model_path=args.checkpoint_path,
+        output_path=args.output_path,
+        n_bits=args.n_bits,
+    )
 
-    # Palettize model
-    original_model = create_predictor(PredictorParams())
-
-    # Load original model for comparison
+    # Compare outputs if requested
     if args.compare:
+        device_obj = torch.device("cpu")
+
+        # Load original model for comparison
+        original_model = create_predictor(PredictorParams())
         if args.checkpoint_path is None:
             state_dict = torch.hub.load_state_dict_from_url(DEFAULT_MODEL_URL, progress=True)
         else:
             state_dict = torch.load(args.checkpoint_path, weights_only=True)
         original_model.load_state_dict(state_dict)
         original_model.eval()
-        original_model.to(args.device)
+        original_model.to(device_obj)
 
-    # Palettize
-    palettized_model = palettize_model(
-        model_path=args.checkpoint_path,
-        output_path=args.output_path,
-        n_bits=args.n_bits,
-        granularity=args.granularity,
-        group_size=args.group_size,
-        calibration_nsamples=args.calibration_nsamples,
-        device=args.device,
-    )
+        # Load the palettized model from the saved Core ML package for comparison
+        # We need to re-create and re-palettize since we don't save the .pt anymore
+        LOGGER.info("Reloading palettized model for comparison...")
 
-    # Compare outputs if requested
-    if args.compare:
-        compare_outputs(original_model, palettized_model, torch.device(args.device))
+        # Re-create the palettized model
+        palettization_config_dict = {
+            "global_config": {
+                "n_bits": args.n_bits,
+                "granularity": "per_tensor",
+            },
+        }
+        palettization_config = PostTrainingPalettizerConfig.from_dict(palettization_config_dict)
+        palettizer = PostTrainingPalettizer(original_model, palettization_config)
+        palettized_model = palettizer.compress()
+
+        compare_outputs(original_model, palettized_model, device_obj)

@@ -1,0 +1,1 @@
+virtual environment is set up with `uv`. Always use `uv run` instead of `python` when executing scripts in this repo.
