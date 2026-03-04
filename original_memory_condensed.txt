@@ -1,0 +1,45 @@
+# Condensed Memory Report: original_memory.txt
+
+Total samples: 35
+Min phys_footprint: 265 MB
+Max phys_footprint: 1420 MB
+Avg phys_footprint: 695 MB
+Max neural_peak: 2932 MB
+
+## Key Samples (phys_footprint / phys_footprint_peak / neural_peak MB)
+
+  Sample   1:  265 MB /  265 MB /    - MB
+  Sample   2:  373 MB /  373 MB /    - MB
+  Sample   3:  929 MB /  929 MB /    - MB
+  Sample   4: 1420 MB / 1420 MB /    - MB
+  Sample   5:  947 MB /  947 MB /    - MB
+  Sample   6:  955 MB /  955 MB /    - MB
+  Sample   7:  955 MB /  955 MB /    - MB
+  Sample   8:  955 MB /  955 MB /    - MB
+  Sample   9:  955 MB /  955 MB /    - MB
+  Sample  10:  955 MB /  955 MB /    - MB
+  Sample  11:  955 MB /  955 MB /    - MB
+  Sample  12:  955 MB /  955 MB /    - MB
+  Sample  13:  789 MB /  789 MB /    - MB
+  Sample  14:  789 MB /  789 MB /    - MB
+  Sample  15:  789 MB /  789 MB /    - MB
+  Sample  16:  789 MB /  789 MB /    - MB
+  Sample  17:  789 MB /  789 MB /    - MB
+  Sample  18:  789 MB /  789 MB /    - MB
+  Sample  19:  539 MB /  539 MB /    - MB
+  Sample  20:  539 MB /  539 MB /    - MB
+  Sample  21:  539 MB /  539 MB /    - MB
+  Sample  22:  539 MB /  539 MB /    - MB
+  Sample  23:  539 MB /  539 MB /    - MB
+  Sample  24:  539 MB /  539 MB /    - MB
+  Sample  25:  303 MB /  303 MB /    - MB
+  Sample  26:  303 MB /  303 MB /    - MB
+  Sample  27:  303 MB /  303 MB /    - MB
+  Sample  28:  303 MB /  303 MB /    - MB
+  Sample  29:  303 MB /  303 MB /    - MB
+  Sample  30:  303 MB /  303 MB /    - MB
+  Sample  31:  303 MB /  303 MB /    - MB
+  Sample  32:  402 MB /  402 MB / 2932 MB
+  Sample  33: 1081 MB / 1081 MB / 2932 MB
+  Sample  34: 1081 MB / 1081 MB / 2932 MB
+  Sample  35: 1081 MB / 1081 MB / 2932 MB

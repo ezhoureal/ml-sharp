@@ -5,7 +5,9 @@
       "mcp__ide__getDiagnostics",
       "Bash(python:*)",
       "Bash(uv run python:*)",
-      "Bash(ls -la:*)"
+      "Bash(ls -la:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

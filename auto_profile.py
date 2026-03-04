@@ -57,7 +57,7 @@ def run_benchmark(model_path: Path, image_path: Path, output_file="memory_report
     cmd = [
         "sudo", "footprint", 
         "-p", str(pid), 
-        "--sample", "0.5",           # Sample every 0.5s
+        "--sample", "1",           # Sample every 0.5s
         "--sample-duration", "60",   # Max duration (failsafe)
         "-v"
     ]
