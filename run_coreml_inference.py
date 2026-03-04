@@ -70,7 +70,7 @@ def preprocess_image(
 
 
 def run_inference(
-    model: ct.models.MLModel,
+    model: ct.models.MLModel | ct.models.CompiledMLModel,
     image: np.ndarray,
     f_px: float,
 ) -> dict[str, np.ndarray]:

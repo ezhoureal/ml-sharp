@@ -2,14 +2,11 @@ import argparse
 import subprocess
 import time
 import os
-import signal
-import sys
 import threading
 from pathlib import Path
+import coremltools as ct
 
-import numpy as np
-
-from run_coreml_inference import load_coreml_model, preprocess_image, run_inference
+from run_coreml_inference import preprocess_image, run_inference
 
 
 def run_model_inference(model_path: Path, image_path: Path) -> None:
@@ -21,9 +18,18 @@ def run_model_inference(model_path: Path, image_path: Path) -> None:
     """
     print("[Model] Starting model loading and inference...")
 
+    load_start_time = time.time()
     # Load model
-    print(f"[Model] Loading model from {model_path}")
-    model = load_coreml_model(model_path)
+    if str(model_path).endswith(".mlmodelc"):
+        print(f"[Model] Loading PRE-COMPILED model from {model_path}")
+        # Use CompiledMLModel for .mlmodelc folders
+        model = ct.models.CompiledMLModel(str(model_path))
+    else:
+        print(f"[Model] Loading SOURCE model from {model_path}")
+        # Use the standard MLModel for .mlpackage or .mlmodel
+        model = ct.models.MLModel(str(model_path))
+    load_end_time = time.time()
+    print(f"[Model] Model loaded in {load_end_time - load_start_time:.2f} seconds")
 
     # Load image (simple numpy load for RGB)
     from sharp.utils import io
@@ -33,9 +39,10 @@ def run_model_inference(model_path: Path, image_path: Path) -> None:
 
     # Run inference
     print("[Model] Running inference...")
+    inference_start_time = time.time()
     predictions = run_inference(model, image, f_px)
-
-    print(f"[Model] Inference complete. Outputs: {list(predictions.keys())}")
+    inference_end_time = time.time()
+    print(f"[Model] Inference completed in {inference_end_time - inference_start_time:.2f} seconds")
 
 # --- PROFILER LOGIC ---
 def run_benchmark(model_path: Path, image_path: Path, output_file="memory_report.txt"):
@@ -67,16 +74,13 @@ def run_benchmark(model_path: Path, image_path: Path, output_file="memory_report
             print("[Profiler] Monitor started. Please enter sudo password if prompted.")
             time.sleep(2) # Give monitor a moment to initialize
             
-            start_time = time.time()
             model_thread.start()
             
             # Wait for the model to finish
             model_thread.join()
-            end_time = time.time()
 
         # 3. Clean up the monitor
         monitor_proc.terminate()
-        print(f"\n[Profiler] Benchmark finished in {end_time - start_time:.2f}s")
         print("-" * 40)
         analyze_report(output_file)
 
